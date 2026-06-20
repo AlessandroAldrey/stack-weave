@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-eat_walker = { path = "../raw-eat-parser" }
-phantom_call = { path = "../phantom-call" }
+eat_walker = { git = "https://github.com/AlessandroAldrey/raw-eat-parser.git", branch = "main" }
+phantom_call = { git = "https://github.com/AlessandroAldrey/phantom-call.git", branch = "main" }
